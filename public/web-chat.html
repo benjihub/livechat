@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GoodCasino Bot Chat</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 0; background: #0f172a; color: #e2e8f0; }
+      header { padding: 14px 16px; background: #111827; border-bottom: 1px solid #1f2937; position: sticky; top: 0; }
+      .wrap { max-width: 900px; margin: 0 auto; padding: 16px; }
+      .chat { height: 70vh; overflow: auto; background: #0b1220; border: 1px solid #1f2937; border-radius: 12px; padding: 12px; }
+      .bubble { max-width: 72%; padding: 10px 12px; border-radius: 14px; margin: 8px 0; line-height: 1.35; white-space: pre-wrap; word-wrap: break-word; }
+      .me { background: #1d4ed8; color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
+      .bot { background: #0e7490; color: #ecfeff; margin-right: auto; border-bottom-left-radius: 4px; }
+      .row { display: flex; gap: 8px; margin-top: 12px; }
+      input[type="text"]{ flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #1f2937; background: #0b1220; color: #e2e8f0; }
+      button { padding: 12px 16px; border-radius: 10px; border: 1px solid #1f2937; background: #16a34a; color: #fff; font-weight: 600; cursor: pointer; }
+      button:disabled { opacity: .6; cursor: not-allowed; }
+      footer { opacity: .7; margin-top: 16px; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="wrap">
+        <strong>GoodCasino Bot Chat</strong>
+      </div>
+    </header>
+    <div class="wrap">
+      <div id="chat" class="chat" role="log" aria-live="polite"></div>
+      <div class="row">
+        <input id="msg" type="text" placeholder="Type a message and press Enter..." />
+        <button id="send">Send</button>
+      </div>
+      <footer>Tip: This talks to /api/bot/chat locally. Set BOT_SECRET and include x-bot-secret header here if you configured one.</footer>
+    </div>
+    <script>
+      const elChat = document.getElementById('chat');
+      const elMsg = document.getElementById('msg');
+      const elSend = document.getElementById('send');
+      const chatId = 'webui_' + Date.now();
+      let busy = false;
+
+      function addBubble(text, who){
+        const div = document.createElement('div');
+        div.className = 'bubble ' + (who === 'me' ? 'me' : 'bot');
+        div.textContent = text;
+        elChat.appendChild(div);
+        elChat.scrollTop = elChat.scrollHeight;
+      }
+
+      async function send(){
+        if(busy) return; busy = true; elSend.disabled = true;
+        const text = elMsg.value.trim();
+        if(!text){ busy = false; elSend.disabled = false; return; }
+        addBubble(text, 'me');
+        elMsg.value = '';
+        try {
+          const secret = sessionStorage.getItem('BOT_SECRET') || '';
+          const resp = await fetch('/api/bot/chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(secret ? { 'x-bot-secret': secret } : {})
+            },
+            body: JSON.stringify({ chatId, message: text })
+          });
+          const ct = resp.headers.get('content-type') || '';
+          if (!ct.includes('application/json')) {
+            const txt = await resp.text();
+            addBubble('Error: ' + (txt || resp.status + ' ' + resp.statusText), 'bot');
+          } else {
+            const data = await resp.json();
+            if(!data.success){
+              addBubble('Error: ' + (data.error || resp.statusText), 'bot');
+            } else {
+              addBubble(String(data.reply || ''), 'bot');
+            }
+          }
+        } catch(err){
+          addBubble('Network error: ' + err.message, 'bot');
+        } finally {
+          busy = false; elSend.disabled = false; elMsg.focus();
+        }
+      }
+
+      elSend.addEventListener('click', send);
+      elMsg.addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ send(); }});
+      addBubble('Hi! I\'m the GoodCasino bot. How can I help?', 'bot');
+      elMsg.focus();
+    </script>
+  </body>
+  </html>

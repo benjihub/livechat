@@ -39,6 +39,12 @@ const {
 } = smartPaymentAI;
 const getPaymentChatState = smartPaymentAI.getChatState;
 
+// Import GoodCasino bot functions for local chat API
+const {
+  getCustomerServiceResponse: gcGetResponse,
+  getChatState: gcGetChatState
+} = require('./newtest3');
+
 const app = express();
 const INITIAL_PORT = parseInt(process.env.PORT || '3001', 10);
 const HOST = '0.0.0.0';
@@ -193,6 +199,8 @@ app.use(cors({
 }));
 app.use(bodyParser.json());
 app.use(express.static(__dirname));
+// Also serve assets from ./public for the web chat UI
+app.use(express.static(path.join(__dirname, 'public')));
 
 
 // API endpoint to get dashboard stats
@@ -270,10 +278,46 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'newtest4.html'));
 });
 
+// Simple route to the GoodCasino web chat UI
+app.get('/web-chat', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'web-chat.html'));
+});
+
 // Use the same LiveChat token as the bot (read from .env)
 const ACCESS_TOKEN = process.env.LIVECHAT_ACCESS_TOKEN || '';
 if (!ACCESS_TOKEN) {
   console.warn('WARNING: LIVECHAT_ACCESS_TOKEN not set. LiveChat endpoints may fail.');
+}
+
+// LiveChat API helper: try Basic or Bearer depending on token shape
+async function livechatPost(path, body, { timeout = 15000 } = {}) {
+  const token = ACCESS_TOKEN || '';
+  const looksBase64 = typeof token === 'string' && /^[A-Za-z0-9+/=]+$/.test(token) && token.includes('=');
+  const headerVariants = looksBase64
+    ? [ { Authorization: `Basic ${token}` }, { Authorization: `Bearer ${token}` } ]
+    : [ { Authorization: `Bearer ${token}` }, { Authorization: `Basic ${token}` } ];
+  let lastErr = null;
+  for (const headers of headerVariants) {
+    try {
+      const { data } = await axios.post(
+        `https://api.livechatinc.com/v3.5${path}`,
+        body,
+        { headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json' }, timeout }
+      );
+      return { ok: true, data };
+    } catch (error) {
+      lastErr = error;
+      const status = error.response?.status;
+      // Only try next variant on auth errors
+      if (status === 401 || status === 403) {
+        continue;
+      }
+      break;
+    }
+  }
+  const msg = lastErr?.response?.data?.error?.message || lastErr?.message || 'Unknown error';
+  const code = lastErr?.response?.status || 500;
+  return { ok: false, error: msg, status: code, raw: lastErr?.response?.data };
 }
 
 // Import promotions module
@@ -720,6 +764,103 @@ app.delete('/promotions/:id', async (req, res) => {
 app.get('/settings', (req, res) => {
   res.json({ success: true, settings });
 });
+
+// --- GoodCasino Bot (newtest3) local chat endpoint ---
+app.get('/api/bot/health', (req, res) => {
+  res.json({ success: true, status: 'ok' });
+});
+app.post('/api/bot/chat', async (req, res) => {
+  try {
+    const requiredSecret = process.env.BOT_SECRET || '';
+    if (requiredSecret) {
+      const provided = req.headers['x-bot-secret'];
+      if (!provided || provided !== requiredSecret) {
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
+      }
+    }
+    const { chatId, message } = req.body || {};
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ success: false, error: 'message is required' });
+    }
+    const id = chatId && String(chatId).trim() ? String(chatId).trim() : `web_${Date.now()}`;
+    // Ensure state exists and get reply from GoodCasino bot
+    gcGetChatState(id);
+    const reply = await gcGetResponse(id, message, `${id}_${Date.now()}`);
+    return res.json({ success: true, chatId: id, reply: reply || '' });
+  } catch (e) {
+    console.error('Error in /api/bot/chat:', e);
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// --- LiveChat debug/admin endpoints (guarded by optional BOT_SECRET) ---
+function requireBotSecret(req, res) {
+  const required = process.env.BOT_SECRET || '';
+  if (!required) return true;
+  const provided = req.headers['x-bot-secret'];
+  if (!provided || provided !== required) {
+    res.status(401).json({ success: false, error: 'Unauthorized' });
+    return false;
+  }
+  return true;
+}
+
+// List chats with optional ?status=active,queued,pending (defaults to active,queued,pending)
+app.get('/api/livechat/chats', async (req, res) => {
+  if (!requireBotSecret(req, res)) return;
+  const statuses = (req.query.status || 'active,queued,pending')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  const body = { filters: { status: statuses }, limit: 50 };
+  const resp = await livechatPost('/agent/action/list_chats', body, {});
+  if (!resp.ok) return res.status(resp.status).json({ success: false, error: resp.error, details: resp.raw });
+  const chats = resp.data?.chats_summary || resp.data?.chats || resp.data?.data?.chats || resp.data?.results || resp.data;
+  res.json({ success: true, count: Array.isArray(chats) ? chats.length : 0, chats });
+});
+
+// Get single chat status
+app.get('/api/livechat/chat/:chatId', async (req, res) => {
+  if (!requireBotSecret(req, res)) return;
+  const { chatId } = req.params;
+  const resp = await livechatPost('/agent/action/get_chat', { chat_id: chatId }, {});
+  if (!resp.ok) return res.status(resp.status).json({ success: false, error: resp.error, details: resp.raw });
+  res.json({ success: true, chat: resp.data?.chat || resp.data?.data?.chat || resp.data });
+});
+
+// Accept a queued/pending chat
+app.post('/api/livechat/accept/:chatId', async (req, res) => {
+  if (!requireBotSecret(req, res)) return;
+  const { chatId } = req.params;
+  const resp = await livechatPost('/agent/action/accept_chat', { chat_id: chatId }, {});
+  if (!resp.ok) return res.status(resp.status).json({ success: false, error: resp.error, details: resp.raw });
+  res.json({ success: true, result: resp.data });
+});
+
+// Join a chat as participant
+app.post('/api/livechat/join/:chatId', async (req, res) => {
+  if (!requireBotSecret(req, res)) return;
+  const { chatId } = req.params;
+  const resp = await livechatPost('/agent/action/join_chat', { chat_id: chatId }, {});
+  if (!resp.ok) return res.status(resp.status).json({ success: false, error: resp.error, details: resp.raw });
+  res.json({ success: true, result: resp.data });
+});
+
+// Send a message to a chat
+app.post('/api/livechat/send/:chatId', async (req, res) => {
+  if (!requireBotSecret(req, res)) return;
+  const { chatId } = req.params;
+  const { text } = req.body || {};
+  if (!text || typeof text !== 'string') {
+    return res.status(400).json({ success: false, error: 'text is required' });
+  }
+  const resp = await livechatPost('/agent/action/send_event', {
+    chat_id: chatId,
+    event: { type: 'message', text, recipients: 'all' }
+  }, {});
+  if (!resp.ok) return res.status(resp.status).json({ success: false, error: resp.error, details: resp.raw });
+  res.json({ success: true, result: resp.data });
+});
 app.post('/settings', (req, res) => {
   const { brandName, welcomeMessage, waitMessage, endMessage } = req.body;
   if (!brandName || !welcomeMessage || !waitMessage || !endMessage) {
@@ -790,6 +931,11 @@ app.use((req, res, next) => {
 app.use((err, req, res, next) => {
   console.error('Server Error:', err);
   res.status(500).json({ error: 'Internal Server Error' });
+});
+
+// 404 handler for API routes to return JSON consistently
+app.use('/api', (req, res) => {
+  res.status(404).json({ success: false, error: `Not found: ${req.method} ${req.originalUrl}` });
 });
 
 // Helper function to get local IP address

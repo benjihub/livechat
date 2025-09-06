@@ -434,6 +434,8 @@ const processedMessages = new Set();
 const lastResponseTimes = new Map(); // Track last response time per chat
 const sentMessages = new Map(); // Track sent messages per chat to prevent duplicates
 const activeChatLocks = new Set();
+// Cooldown tracker for chats that returned "Chat not active"
+const inactiveChatUntil = new Map(); // chatId -> timestamp ms
 
 // Game list and off-topic questions storage
 let gameData = {
@@ -2301,10 +2303,10 @@ async function joinChat(chatId) {
 async function ensureChatActive(chatId) {
   try {
     const data = await livechatPost('/agent/action/get_chat', { chat_id: chatId }, { retries: 1, backoffMs: 300, label: 'get_chat' });
-    const status = (data?.chat?.status || data?.status || '').toString().toLowerCase();
-    if (!status) return true; // assume ok if unknown
-    if (status.includes('archived') || status.includes('closed')) return false;
-    if (status.includes('queued') || status.includes('pending')) {
+  const status = (data?.chat?.status || data?.status || '').toString().toLowerCase();
+  if (!status) return false; // be conservative if unknown
+  if (status.includes('archived') || status.includes('closed') || status.includes('inactive') || status.includes('ended') || status.includes('resolved')) return false;
+  if (status.includes('queued') || status.includes('pending')) {
       await acceptChat(chatId);
     }
     // Ensure we're a participant
@@ -2312,7 +2314,7 @@ async function ensureChatActive(chatId) {
     return true;
   } catch (e) {
     console.warn(`ensureChatActive failed for ${chatId}:`, e.response?.data?.error?.message || e.message);
-    return true; // don't block; let send attempt surface actual state
+  return false; // don't proceed when we can't verify
   }
 }
 
@@ -2331,9 +2333,13 @@ async function getActiveChats() {
     
     // Parse chats from different possible shapes
     const chats = data?.chats_summary || data?.chats || data?.data?.chats || data?.results || data;
+    const now = Date.now();
     const activeChats = Array.isArray(chats) ? chats.filter(chat => {
       const status = chat.status || chat.chat?.status;
-      return status !== 'archived' && status !== 'closed';
+      const id = chat.id || chat.chat_id || chat.chat?.id;
+      // Exclude archived/closed and any chat under cooldown after "Chat not active"
+      const cooling = id && inactiveChatUntil.has(id) && inactiveChatUntil.get(id) > now;
+      return status !== 'archived' && status !== 'closed' && !cooling;
     }) : [];
     
     return activeChats;
@@ -2357,7 +2363,17 @@ async function getActiveChats() {
 // Safe sendMessage with single sequential attempt to avoid duplicate sends
 async function sendMessage(chatId, message) {
   try {
-    await ensureChatActive(chatId);
+    // Skip if chat is under cooldown
+    const until = inactiveChatUntil.get(chatId) || 0;
+    if (until && Date.now() < until) {
+      console.log(`⏸️  Skipping send to ${chatId} (cooldown active)`);
+      return false;
+    }
+    const okActive = await ensureChatActive(chatId);
+    if (!okActive) {
+      console.log(`📁 Chat ${chatId} not active; skipping send.`);
+      return false;
+    }
     await livechatPost(
       '/agent/action/send_event',
       {
@@ -2396,6 +2412,8 @@ async function sendMessage(chatId, message) {
           console.log('Retry send failed:', msg2);
         }
       }
+  // Put chat on cooldown for 15 minutes to avoid repeated attempts
+  inactiveChatUntil.set(chatId, Date.now() + 15 * 60 * 1000);
       console.log(`📁 Chat ${chatId} appears inactive/closed; skipping further sends this cycle.`);
     }
     return false;
@@ -2418,7 +2436,10 @@ async function getLatestCustomerMessage(chatId) {
         if (event.type !== 'message' || !event.text || !event.author_id) {
           return false;
         }
-        
+        // Only consider customer-authored messages when available
+        if (event.author_type && String(event.author_type).toLowerCase() !== 'customer') {
+          return false;
+        }
         // Exclude agent, bot, and system messages
         const authorId = event.author_id.toLowerCase();
         if (authorId.includes('agent') || authorId.includes('bot') || authorId.includes('system')) {
@@ -2560,7 +2581,23 @@ async function processChat(chat) {
   try {
   const chatState = getChatState(chat.id);
 
-    // Fetch latest customer message first
+    // Short-circuit if this chat is under cooldown
+    const coolUntil = inactiveChatUntil.get(chat.id) || 0;
+    if (coolUntil && Date.now() < coolUntil) {
+      console.log(`⏸️  Skipping chat ${chat.id} (cooldown active)`);
+      return;
+    }
+
+    // Verify chat is currently active or can be accepted
+    const canProceed = await ensureChatActive(chat.id);
+    if (!canProceed) {
+      console.log(`📁 Skipping chat ${chat.id} (not active)`);
+      // put short cooldown to avoid immediate re-check
+      inactiveChatUntil.set(chat.id, Date.now() + 5 * 60 * 1000);
+      return;
+    }
+
+    // Fetch latest customer message after ensuring activity
     const latestMessage = await getLatestCustomerMessage(chat.id);
 
     // Early skip if chat looks closed/archived
@@ -2575,7 +2612,7 @@ async function processChat(chat) {
       return;
     }
 
-    // Idle guard welcome: send only if no customer message seen yet
+  // Idle guard welcome: send only if no customer message seen yet
   if (!chatState.hasSentWelcome) {
       const noCustomerMessage = !latestMessage || latestMessage.author_type !== 'customer';
       if (noCustomerMessage) {
