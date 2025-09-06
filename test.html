@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiveChat Widget Test</title>
+</head>
+<body>
+    <!-- LiveChat widget -->
+<!-- Start of LiveChat (www.livechat.com) code -->
+<script>
+    window.__lc = window.__lc || {};
+    window.__lc.license = 19291328;
+    window.__lc.integration_name = "manual_onboarding";
+    window.__lc.product_name = "livechat";
+    ;(function(n,t,c){function i(n){return e._h?e._h.apply(null,n):e._q.push(n)}var e={_q:[],_h:null,_v:"2.0",on:function(){i(["on",c.call(arguments)])},once:function(){i(["once",c.call(arguments)])},off:function(){i(["off",c.call(arguments)])},get:function(){if(!e._h)throw new Error("[LiveChatWidget] You can't use getters before load.");return i(["get",c.call(arguments)])},call:function(){i(["call",c.call(arguments)])},init:function(){var n=t.createElement("script");n.async=!0,n.type="text/javascript",n.src="https://cdn.livechatinc.com/tracking.js",t.head.appendChild(n)}};!n.__lc.asyncInit&&e.init(),n.LiveChatWidget=n.LiveChatWidget||e}(window,document,[].slice))
+</script>
+<noscript><a href="https://www.livechat.com/chat-with/19291328/" rel="nofollow">Chat with us</a>, powered by <a href="https://www.livechat.com/?welcome" rel="noopener nofollow" target="_blank">LiveChat</a></noscript>
+<!-- End of LiveChat code -->
+
+<!-- Bot bridge: forward visitor messages to your server -->
+<script>
+    // 1) Set your server endpoint (adjust port/domain as needed)
+    window.__BOT_ENDPOINT__ = 'http://localhost:3001/send-message';
+    // 2) Shared secret to protect your API (also set BOT_SECRET in your server .env)
+    window.__BOT_SECRET__ = 'x-bot-secret';
+
+    // LiveChat widget API hook (legacy LC_API style)
+    window.LC_API = window.LC_API || {};
+    window.LC_API.on_message = function (payload) {
+        try {
+            if (!payload || payload.author_type !== 'visitor') return;
+            var text = payload.text || payload.message || '';
+            if (!text) return;
+            var chatId = (window.LC_API.get_chat_id && window.LC_API.get_chat_id()) || payload.chat_id || null;
+            if (!chatId) {
+                console.warn('[bot-bridge] Missing chatId. Payload was:', payload);
+                return;
+            }
+            var userId = (payload.user_id || payload.id || 'visitor');
+            fetch(window.__BOT_ENDPOINT__, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-bot-secret': window.__BOT_SECRET__ },
+                body: JSON.stringify({ chatId: chatId, message: text, userId: userId })
+            }).catch(function (e) { console.warn('[bot-bridge] forward failed', e); });
+        } catch (e) {
+            console.warn('[bot-bridge] error', e);
+        }
+    };
+</script>
+
+
+</body>
+</html>
