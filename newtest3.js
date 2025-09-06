@@ -2326,7 +2326,12 @@ async function sendMessage(chatId, message) {
     console.log(`✅ Message sent to ${chatId}`);
     return true;
   } catch (error) {
-    console.log('sendMessage failed:', error.response?.data?.error?.message || error.message);
+    const errMsg = error.response?.data?.error?.message || error.message || '';
+    console.log('sendMessage failed:', errMsg);
+    // If chat is not active/closed, avoid retrying blindly
+    if (/chat\s*not\s*active/i.test(errMsg) || /closed/i.test(errMsg)) {
+      console.log(`📁 Chat ${chatId} appears inactive/closed; skipping further sends this cycle.`);
+    }
     return false;
   }
 }
@@ -2487,13 +2492,25 @@ async function processChat(chat) {
   }
   activeChatLocks.add(chat.id);
   try {
-    const chatState = getChatState(chat.id);
+  const chatState = getChatState(chat.id);
 
     // Fetch latest customer message first
     const latestMessage = await getLatestCustomerMessage(chat.id);
 
+    // Early skip if chat looks closed/archived
+    const status = (chat && (chat.status || chat.chat?.status || '')).toString().toLowerCase();
+    if (status && (status.includes('archived') || status.includes('closed'))) {
+      console.log(`📁 Skipping non-active chat ${chat.id} (status: ${status})`);
+      return;
+    }
+    const archived = await isChatArchived(chat.id);
+    if (archived) {
+      console.log(`📁 Skipping archived chat ${chat.id} (via get_chat)`);
+      return;
+    }
+
     // Idle guard welcome: send only if no customer message seen yet
-    if (!chatState.hasSentWelcome) {
+  if (!chatState.hasSentWelcome) {
       const noCustomerMessage = !latestMessage || latestMessage.author_type !== 'customer';
       if (noCustomerMessage) {
         const sent = await sendMessage(chat.id, STARTING_MESSAGE);
