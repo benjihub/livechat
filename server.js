@@ -282,6 +282,9 @@ app.get('/', (req, res) => {
 app.get('/web-chat', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'web-chat.html'));
 });
+app.get('/chat', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'web-chat.html'));
+});
 
 // Use the same LiveChat token as the bot (read from .env)
 const ACCESS_TOKEN = process.env.LIVECHAT_ACCESS_TOKEN || '';
