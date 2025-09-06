@@ -4,7 +4,8 @@
 const http = require('http');
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
-const URL = `http://localhost:${PORT}/`;
+const SERVER_BASE = process.env.SERVER_BASE || `http://localhost:${PORT}`;
+const URL = SERVER_BASE.endsWith('/') ? SERVER_BASE : `${SERVER_BASE}/`;
 
 const start = Date.now();
 const timeoutMs = 30_000; // give server up to 30s to start

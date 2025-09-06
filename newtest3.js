@@ -322,10 +322,14 @@ const axiosLivechat = axios.create({
   }
 });
 
+// Build server base from env (falls back to localhost:PORT)
+const SERVER_PORT = process.env.PORT || '3001';
+const SERVER_BASE = process.env.SERVER_BASE || `http://localhost:${SERVER_PORT}`;
+
 // Silent support ping to our own server; never affects user-facing flow
 async function pingSupportSilently({ type = 'account_assistance', chatId, userId = 'anonymous', amount = null, language = 'id', message = '' }) {
   try {
-    await axios.post('http://localhost:3001/support-ping', {
+  await axios.post(`${SERVER_BASE}/support-ping`, {
       type,
       chatId,
       userId,
@@ -2022,7 +2026,7 @@ if (isDepositInquiry(userMessage) && !withdrawKeywords.test(userMessage)) {
     const confirmationMsg = `Baik, saya akan cek deposit untuk User ID: ${userId} sejumlah ${formattedAmt}. Mohon ditunggu sebentar.`;
 
     try {
-        await axios.post('http://localhost:3001/support-ping', {
+      await axios.post(`${SERVER_BASE}/support-ping`, {
             type: 'deposit_check',
             chatId,
             userId,

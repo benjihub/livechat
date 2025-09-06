@@ -230,7 +230,7 @@ let chatDetails = new Map(); // Store chat details for each ticket
 // Fetch promotions from backend and update UI
 async function fetchPromotions() {
     try {
-        const res = await fetch('http://localhost:3001/promotions');
+    const res = await fetch('/promotions');
         const data = await res.json();
         if (data.success) {
             window.promotions = data.promotions;
@@ -312,7 +312,7 @@ async function addPromotion() {
             eligibleItems: eligible || null,
             endDate: endDate || null
         };
-        const res = await fetch('http://localhost:3001/promotions', {
+    const res = await fetch('/promotions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -341,7 +341,7 @@ async function addPromotion() {
 async function deletePromotion(id) {
     if (!confirm('Delete this promotion?')) return;
     try {
-        const res = await fetch(`http://localhost:3001/promotions/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/promotions/${id}`, { method: 'DELETE' });
         const data = await res.json();
         if (data.success) {
             await fetchPromotions();
@@ -1247,7 +1247,7 @@ function updateBotResponse() {
 }
 
 function loadSettings() {
-  fetch('http://localhost:3001/settings')
+    fetch('/settings')
     .then(res => res.json())
     .then(data => {
       if (data.success) {
@@ -1266,7 +1266,7 @@ function saveSettings(e) {
     waitMessage: document.getElementById('waitMessage').value,
     endMessage: document.getElementById('endMessage').value
   };
-  fetch('http://localhost:3001/settings', {
+    fetch('/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings)
@@ -1287,7 +1287,7 @@ function saveSettings(e) {
 // RTP Management
 async function loadRtpLink() {
   try {
-    const res = await fetch('http://localhost:3001/api/rtp');
+    const res = await fetch('/api/rtp');
     const data = await res.json();
     if (data && data.success) {
       document.getElementById('rtpLinkInput').value = data.rtpLink || '';
@@ -1307,7 +1307,7 @@ async function saveRtpLink() {
     return;
   }
   try {
-    const res = await fetch('http://localhost:3001/api/rtp', {
+    const res = await fetch('/api/rtp', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rtpLink: link })
@@ -1491,7 +1491,7 @@ function updateSupportPingBadge(count) {
 
 async function pollSupportPings() {
   try {
-    const res = await fetch('http://localhost:3001/support-pings');
+    const res = await fetch('/support-pings');
     const data = await res.json();
     if (!data.success) return;
     const pings = Array.isArray(data.pings) ? data.pings : [];
@@ -1507,7 +1507,7 @@ async function pollSupportPings() {
         }
       });
       // Mark as read to avoid duplicates on next poll
-      fetch('http://localhost:3001/support-pings?markRead=true').catch(()=>{});
+    fetch('/support-pings?markRead=true').catch(()=>{});
     }
   } catch (e) {
     // silent fail; optionally log
