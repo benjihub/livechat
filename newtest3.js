@@ -2270,6 +2270,52 @@ function getWarningMessage(chatState, _language) {
 }
 
 // API Functions - ULTRA FAST VERSION
+async function acceptChat(chatId) {
+  try {
+    await livechatPost('/agent/action/accept_chat', { chat_id: chatId }, { retries: 1, backoffMs: 300, label: 'accept_chat' });
+    console.log(`🙋 Accepted chat ${chatId}`);
+    return true;
+  } catch (e) {
+    const msg = e.response?.data?.error?.message || e.message;
+    console.warn(`accept_chat failed for ${chatId}: ${msg}`);
+    return false;
+  }
+}
+
+async function joinChat(chatId) {
+  try {
+    await livechatPost('/agent/action/join_chat', { chat_id: chatId }, { retries: 1, backoffMs: 300, label: 'join_chat' });
+    console.log(`🤝 Joined chat ${chatId}`);
+    return true;
+  } catch (e) {
+    const msg = e.response?.data?.error?.message || e.message;
+    // It's fine if we are already a member
+    if (/already\s+in\s+chat/i.test(msg)) {
+      return true;
+    }
+    console.warn(`join_chat failed for ${chatId}: ${msg}`);
+    return false;
+  }
+}
+
+async function ensureChatActive(chatId) {
+  try {
+    const data = await livechatPost('/agent/action/get_chat', { chat_id: chatId }, { retries: 1, backoffMs: 300, label: 'get_chat' });
+    const status = (data?.chat?.status || data?.status || '').toString().toLowerCase();
+    if (!status) return true; // assume ok if unknown
+    if (status.includes('archived') || status.includes('closed')) return false;
+    if (status.includes('queued') || status.includes('pending')) {
+      await acceptChat(chatId);
+    }
+    // Ensure we're a participant
+    await joinChat(chatId);
+    return true;
+  } catch (e) {
+    console.warn(`ensureChatActive failed for ${chatId}:`, e.response?.data?.error?.message || e.message);
+    return true; // don't block; let send attempt surface actual state
+  }
+}
+
 async function getActiveChats() {
   try {
     if (!ACCESS_TOKEN) {
@@ -2311,6 +2357,7 @@ async function getActiveChats() {
 // Safe sendMessage with single sequential attempt to avoid duplicate sends
 async function sendMessage(chatId, message) {
   try {
+    await ensureChatActive(chatId);
     await livechatPost(
       '/agent/action/send_event',
       {
@@ -2329,7 +2376,26 @@ async function sendMessage(chatId, message) {
     const errMsg = error.response?.data?.error?.message || error.message || '';
     console.log('sendMessage failed:', errMsg);
     // If chat is not active/closed, avoid retrying blindly
-    if (/chat\s*not\s*active/i.test(errMsg) || /closed/i.test(errMsg)) {
+    if (/chat\s*not\s*active/i.test(errMsg) || /closed/i.test(errMsg) || /not\s*found/i.test(errMsg)) {
+      console.log(`🔁 Attempting to accept/join chat ${chatId} and retry once...`);
+      const ok = await ensureChatActive(chatId);
+      if (ok) {
+        try {
+          await livechatPost(
+            '/agent/action/send_event',
+            {
+              chat_id: chatId,
+              event: { type: 'message', text: message, recipients: 'all' }
+            },
+            { retries: 1, backoffMs: 300, label: 'send_event_retry' }
+          );
+          console.log(`✅ Message sent to ${chatId} after re-activating`);
+          return true;
+        } catch (e2) {
+          const msg2 = e2.response?.data?.error?.message || e2.message;
+          console.log('Retry send failed:', msg2);
+        }
+      }
       console.log(`📁 Chat ${chatId} appears inactive/closed; skipping further sends this cycle.`);
     }
     return false;
