@@ -40,11 +40,12 @@ const {
 const getPaymentChatState = smartPaymentAI.getChatState;
 
 const app = express();
-const PORT = parseInt(process.env.PORT || '3001', 10);
+const INITIAL_PORT = parseInt(process.env.PORT || '3001', 10);
 const HOST = '0.0.0.0';
 
 // Global server instance
 let serverInstance = null;
+let activePort = INITIAL_PORT;
 
 // Function to get server instance
 function getServerInstance() {
@@ -59,67 +60,82 @@ const startServer = async () => {
   try {
     await initializeDatabase();
     
-    // Create new server instance (omit explicit host to let Node pick the best interface)
-    const server = app.listen(PORT, () => {
-      const addressInfo = server.address();
-      // Always set serverInstance once listening
-      serverInstance = server;
+    // Helper to attempt listening on a port and resolve/reject accordingly
+    const listenOnce = (port) => new Promise((resolve, reject) => {
+      const server = app.listen(port, () => resolve(server));
+      server.on('error', (err) => reject(err));
+    });
 
-      let localUrl = `http://localhost:${PORT}`;
-      let networkUrl = `http://${getLocalIpAddress()}:${PORT}`;
+    // Try initial port, then next two if busy (total up to 3 attempts)
+    let portToTry = INITIAL_PORT;
+    let attemptsLeft = 2;
+    while (true) {
+      try {
+        const server = await listenOnce(portToTry);
+        serverInstance = server;
+        activePort = portToTry;
 
-      if (addressInfo) {
-        if (typeof addressInfo === 'string') {
-          // Named pipe or UNIX socket
-          localUrl = addressInfo;
-          networkUrl = addressInfo;
-        } else if (typeof addressInfo === 'object' && addressInfo.port) {
-          localUrl = `http://localhost:${addressInfo.port}`;
-          networkUrl = `http://${getLocalIpAddress()}:${addressInfo.port}`;
+        const addressInfo = server.address();
+        let localUrl = `http://localhost:${portToTry}`;
+        let networkUrl = `http://${getLocalIpAddress()}:${portToTry}`;
+        if (addressInfo) {
+          if (typeof addressInfo === 'string') {
+            localUrl = addressInfo;
+            networkUrl = addressInfo;
+          } else if (typeof addressInfo === 'object' && addressInfo.port) {
+            localUrl = `http://localhost:${addressInfo.port}`;
+            networkUrl = `http://${getLocalIpAddress()}:${addressInfo.port}`;
+          }
         }
-      } else {
-        // address() may transiently be null; log based on PORT and continue
-        console.warn('⚠️ server.address() returned null; continuing with PORT-based URLs');
+
+        console.log(`\n🚀 Server Details:`);
+        console.log(`   • Address: ${localUrl}`);
+        console.log(`   • Network: Accessible from other devices on the network`);
+        console.log(`   • Time: ${new Date().toISOString()}`);
+
+        console.log('\n🔍 Available Endpoints:');
+        console.log(`   • GET  /api/promotions - List all promotions`);
+        console.log(`   • POST /api/promotions - Add a new promotion`);
+        console.log(`   • PUT  /api/promotions/:id - Update a promotion`);
+        console.log(`   • DELETE /api/promotions/:id - Delete a promotion`);
+        console.log(`   • GET  /api/rtp - Get RTP link (JSON)`);
+        console.log(`   • PUT  /api/rtp - Update RTP link (persisted)`);
+        console.log(`   • POST /api/rtp - Get RTP link (JSON)`);
+        console.log(`   • GET  /api/trp - Alias RTP link (JSON)`);
+        console.log(`   • POST /api/trp - Alias RTP link (JSON)`);
+
+        console.log('\n✨ Server Features:');
+        console.log('   • Payment processing automation');
+        console.log('   • Real-time promotions management');
+        console.log('   • Smart AI response generation');
+        console.log('   • Bilingual support (EN/ID)');
+
+        console.log('\nServer is running on:');
+        console.log(`   - Local: ${localUrl}`);
+        console.log(`   - Network: ${networkUrl}`);
+        console.log('\n✨ Server is ready!');
+
+        // Also attach a generic error logger for runtime errors
+        server.on('error', (error) => {
+          console.error('\n❌ Server error:', error);
+        });
+        break; // success
+      } catch (error) {
+        if (error.code === 'EADDRINUSE' && attemptsLeft > 0) {
+          console.error(`\n❌ Port ${portToTry} in use. Retrying on ${portToTry + 1}...`);
+          portToTry += 1;
+          attemptsLeft -= 1;
+          continue;
+        }
+        if (error.code === 'EADDRINUSE') {
+          console.error(`\n❌ All attempted ports are in use starting from ${INITIAL_PORT}.`);
+          console.log('Please close the other application or set a free PORT in .env.');
+        } else {
+          console.error('\n❌ Failed to start server:', error);
+        }
+        process.exit(1);
       }
-
-      console.log(`\n🚀 Server Details:`);
-      console.log(`   • Address: ${localUrl}`);
-      console.log(`   • Network: Accessible from other devices on the network`);
-      console.log(`   • Time: ${new Date().toISOString()}`);
-
-      console.log('\n🔍 Available Endpoints:');
-      console.log(`   • GET  /api/promotions - List all promotions`);
-      console.log(`   • POST /api/promotions - Add a new promotion`);
-      console.log(`   • PUT  /api/promotions/:id - Update a promotion`);
-      console.log(`   • DELETE /api/promotions/:id - Delete a promotion`);
-      console.log(`   • GET  /api/rtp - Get RTP link (JSON)`);
-      console.log(`   • PUT  /api/rtp - Update RTP link (persisted)`);
-      console.log(`   • POST /api/rtp - Get RTP link (JSON)`);
-      console.log(`   • GET  /api/trp - Alias RTP link (JSON)`);
-      console.log(`   • POST /api/trp - Alias RTP link (JSON)`);
-
-      console.log('\n✨ Server Features:');
-      console.log('   • Payment processing automation');
-      console.log('   • Real-time promotions management');
-      console.log('   • Smart AI response generation');
-      console.log('   • Bilingual support (EN/ID)');
-
-      console.log('\nServer is running on:');
-      console.log(`   - Local: ${localUrl}`);
-      console.log(`   - Network: ${networkUrl}`);
-      console.log('\n✨ Server is ready!');
-    });
-
-    // Handle server errors
-    server.on('error', (error) => {
-      if (error.code === 'EADDRINUSE') {
-        console.error(`\n❌ Error: Port ${PORT} is already in use.`);
-        console.log('Please close the other application or use a different port.');
-      } else {
-        console.error('\n❌ Server error:', error);
-      }
-      process.exit(1);
-    });
+    }
 
   } catch (error) {
     console.error('❌ Failed to start server:', error);

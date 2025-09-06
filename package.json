@@ -30,6 +30,7 @@
     "open": "node open-browser.js",
     "start": "node run-all.js",
     "cleanup": "node cleanup-old-chats.js",
-    "schedule-cleanup": "node -e \"const { exec } = require('child_process'); setInterval(() => exec('npm run cleanup'), 12 * 60 * 60 * 1000)\""
+  "schedule-cleanup": "node -e \"const { exec } = require('child_process'); setInterval(() => exec('npm run cleanup'), 12 * 60 * 60 * 1000)\"",
+  "reset-chat": "node reset-chat.js"
   }
 }
