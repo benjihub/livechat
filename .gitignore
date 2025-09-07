@@ -8,6 +8,8 @@ pnpm-debug.log*
 # Env & secrets
 .env
 .env.*
+*.key
+*.pem
 
 # OS
 .DS_Store
@@ -22,6 +24,9 @@ dist/
 /database/*.db
 /database/*.db-shm
 /database/*.db-wal
+*.sqlite
+*.db
+*.db-*
 
 # Misc
 *.local

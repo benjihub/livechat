@@ -1,5 +1,4 @@
 const axios = require('axios');
-const { OpenAI } = require('openai');
 require('dotenv').config();
 const fs = require('fs').promises;
 const path = require('path');
@@ -13,7 +12,26 @@ dbUtils.initDb().catch(err => {
   process.exit(1);
 });
 
-const ACCESS_TOKEN = 'NzdiZGVmYjAtMWI2Mi00ZjllLTg1YWItYjczNzJjYTk1N2Y2OnVzLXNvdXRoMTpVLU1JbElnT0tiSEhuWldwN1E5YXFQaFR0VlU=';
+const ACCESS_TOKEN = process.env.LIVECHAT_ACCESS_TOKEN || '';
+if (!ACCESS_TOKEN) {
+  console.warn('WARNING: LIVECHAT_ACCESS_TOKEN not set. LiveChat features in smart-payment-ai are disabled.');
+}
+
+let openai = null;
+(async () => {
+  try {
+    if (process.env.USE_OPENAI && process.env.OPENAI_API_KEY) {
+      const mod = await import('openai');
+      const OpenAI = mod.OpenAI || mod.default;
+      if (OpenAI) {
+        openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        console.log('✅ OpenAI (smart-payment-ai) enabled');
+      }
+    }
+  } catch (e) {
+    console.warn('OpenAI init failed in smart-payment-ai:', e.message);
+  }
+})();
 
 // Game information and rules
 const GAME_INFO = {
@@ -119,17 +137,34 @@ function isBankInfoQuery(message) {
 }
 
 // Revalidate a chat is still active before attempting to send
+// Helper to POST to LiveChat with Basic/Bearer fallback
+async function livechatPost(path, body, { timeout = 8000, label = 'livechat' } = {}) {
+  const url = `https://api.livechatinc.com/v3.5${path}`;
+  const strategies = [
+    { Authorization: `Basic ${ACCESS_TOKEN}` },
+    { Authorization: `Bearer ${ACCESS_TOKEN}` }
+  ];
+  let lastErr;
+  for (let i = 0; i < strategies.length; i++) {
+    try {
+      const { data } = await axios.post(url, body, { headers: { ...strategies[i], 'Content-Type': 'application/json', Accept: 'application/json' }, timeout });
+      return data;
+    } catch (e) {
+      lastErr = e;
+      const status = e.response?.status;
+      if (status === 401 || status === 403) {
+        // try next auth style
+        continue;
+      }
+      break;
+    }
+  }
+  throw lastErr;
+}
+
 async function isChatStillActive(chatId) {
   try {
-    const { data } = await axios.post(
-      'https://api.livechatinc.com/v3.5/agent/action/list_chats',
-      { filters: { status: ['active', 'queued', 'pending'] }, limit: 50 },
-      {
-        headers: { Authorization: `Basic ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-        timeout: 3000
-      }
-    );
-
+    const data = await livechatPost('/agent/action/list_chats', { filters: { status: ['active', 'queued', 'pending'] }, limit: 50 }, { label: 'list_chats' });
     const chats = data?.chats_summary || data?.chats || data?.data?.chats || [];
     const found = (Array.isArray(chats) ? chats : []).find(c => (c.id || c.chat_id || c.chat?.id) === chatId);
     if (!found) return false;
@@ -167,7 +202,6 @@ function getCurrentTimestamp() {
 
 // Configuration
 const POLL_INTERVAL = 5000;
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Smart State Management
 const chatStates = new Map();
@@ -616,23 +650,13 @@ async function processPaymentAssistant(chatId, userMessage, chatState) {
 // API Functions
 async function getActiveChats() {
   try {
-    const { data } = await axios.post(
-      'https://api.livechatinc.com/v3.5/agent/action/list_chats',
-      { filters: { status: ['active', 'queued', 'pending'] }, limit: 20 },
-      { 
-        headers: { Authorization: `Basic ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-        timeout: 3000
-      }
-    );
-    
+    const data = await livechatPost('/agent/action/list_chats', { filters: { status: ['active', 'queued', 'pending'] }, limit: 20 }, { label: 'list_chats' });
     const chats = data?.chats_summary || data?.chats || data?.data?.chats || data;
     const activeChats = Array.isArray(chats) ? chats.filter(chat => {
       const status = chat.status || chat.chat?.status;
       return status !== 'archived' && status !== 'closed';
     }) : [];
-    
     return activeChats;
-    
   } catch (error) {
     console.error('Failed to get chats:', error.response?.data || error.message);
     return [];
@@ -703,14 +727,7 @@ async function sendMessage(chatId, message) {
 
 async function getLatestCustomerMessage(chatId) {
   try {
-    const { data } = await axios.post(
-      'https://api.livechatinc.com/v3.5/agent/action/list_threads',
-      { chat_id: chatId },
-      { 
-        headers: { Authorization: `Basic ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-        timeout: 3000
-      }
-    );
+    const data = await livechatPost('/agent/action/list_threads', { chat_id: chatId }, { label: 'list_threads', timeout: 8000 });
 
     const allEvents = (data.threads || []).flatMap(thread => thread.events || []);
     
@@ -758,6 +775,12 @@ async function getLatestCustomerMessage(chatId) {
   }
 }
 
+async function ensureParticipating(chatId) {
+  // Try accept, then join; ignore failures
+  try { await livechatPost('/agent/action/accept_chat', { chat_id: chatId }, { label: 'accept_chat' }); } catch(_) {}
+  try { await livechatPost('/agent/action/join_chat', { chat_id: chatId }, { label: 'join_chat' }); } catch(_) {}
+}
+
 async function processChat(chat) {
   try {
     const latestMessage = await getLatestCustomerMessage(chat.id);
@@ -793,6 +816,8 @@ async function processChat(chat) {
         processedMessages.set(messageKey, Date.now());
         return null;
       }
+      // Ensure we are a participant (accept/join if needed)
+      await ensureParticipating(chat.id);
       // Anti-duplicate: avoid sending identical text within 60 seconds
       const DUP_WINDOW_MS = 60000;
       const lastSent = sentMessages.get(chat.id);
@@ -984,6 +1009,10 @@ async function isAskingForMoreDetails(message, chatId) {
   
   // Use OpenAI for more complex cases
   try {
+    if (!openai) {
+      // Fallback to keyword-based check when OpenAI is disabled
+      return detailKeywords.some(keyword => lowerMsg.includes(keyword));
+    }
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
@@ -1174,29 +1203,7 @@ function formatPromoList(promotions, language) {
   return response;
 }
 
-// Function to clean up old chat history
-async function cleanUpOldChats() {
-  try {
-    const cutoffTime = Date.now() - (48 * 60 * 60 * 1000); // 48 hours in milliseconds
-    const chats = await dbUtils.getAllChats();
-    let deletedCount = 0;
-
-    for (const chat of chats) {
-      const lastMessageTime = Math.max(...chat.messages.map(m => m.timestamp));
-      if (lastMessageTime < cutoffTime) {
-        await dbUtils.deleteChat(chat.id);
-        deletedCount++;
-      }
-    }
-    
-    console.log(`🧹 Cleaned up ${deletedCount} old chats`);
-  } catch (error) {
-    console.error('Error cleaning up old chats:', error);
-  }
-}
-
-// Schedule cleanup to run every 48 hours
-setInterval(cleanUpOldChats, 48 * 60 * 60 * 1000);
+// Optional: chat cleanup skipped as db-utils does not expose list/delete helpers in this project
 
 // Enhanced response generation with promotions support
 async function getSmartResponse(chatId, userMessage, messageId) {

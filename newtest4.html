@@ -1185,32 +1185,7 @@ async function addPromotion() {
  
 
 
-    window.__lc = window.__lc || {};
-    window.__lc.license = 7100151; // our license key
-    window.__lc.integration_name = "manual_channels";
-    window.__lc.product_name = "livechat";
-    window.__lc.group = 254; // this is agent group
-    window.__lc.chat_between_groups = false;
-    ;(function(n,t,c){
-        function i(n){return e._h?e._h.apply(null,n):e._q.push(n)}
-        var e={_q:[],_h:null,_v:"2.0",
-            on:function(){i(["on",c.call(arguments)])},
-            once:function(){i(["once",c.call(arguments)])},
-            off:function(){i(["off",c.call(arguments)])},
-            get:function(){
-                if(!e._h)throw new Error("[LiveChatWidget] You can't use getters before load.");
-                return i(["get",c.call(arguments)])},
-            call:function(){i(["call",c.call(arguments)])},
-            init:function(){
-                var n=t.createElement("script");
-                n.async=!0,n.type="text/javascript";
-                n.src="https://cdn.livechatinc.com/tracking.js";
-                t.head.appendChild(n)
-            }
-        };
-        !n.__lc.asyncInit&&e.init();
-        n.LiveChatWidget=n.LiveChatWidget||e
-    }(window,document,[].slice))
+    // LiveChat inline boot snippet removed here to avoid duplicates. See single widget at bottom of page.
 
 
 // Delete promotion via backend
@@ -1518,16 +1493,16 @@ async function pollSupportPings() {
 // Start polling every 7 seconds
 setInterval(pollSupportPings, 7000);
 </script>
-<!-- LiveChat widget -->
+<!-- LiveChat widget (single authoritative embed) -->
 <!-- Start of LiveChat (www.livechat.com) code -->
 <script>
     window.__lc = window.__lc || {};
-    window.__lc.license = 19280100;
-    window.__lc.integration_name = "manual_channels";
+    window.__lc.license = 19291328;
+    window.__lc.integration_name = "manual_onboarding";
     window.__lc.product_name = "livechat";
     ;(function(n,t,c){function i(n){return e._h?e._h.apply(null,n):e._q.push(n)}var e={_q:[],_h:null,_v:"2.0",on:function(){i(["on",c.call(arguments)])},once:function(){i(["once",c.call(arguments)])},off:function(){i(["off",c.call(arguments)])},get:function(){if(!e._h)throw new Error("[LiveChatWidget] You can't use getters before load.");return i(["get",c.call(arguments)])},call:function(){i(["call",c.call(arguments)])},init:function(){var n=t.createElement("script");n.async=!0,n.type="text/javascript",n.src="https://cdn.livechatinc.com/tracking.js",t.head.appendChild(n)}};!n.__lc.asyncInit&&e.init(),n.LiveChatWidget=n.LiveChatWidget||e}(window,document,[].slice))
 </script>
-<noscript><a href="https://www.livechat.com/chat-with/19280100/" rel="nofollow">Chat with us</a>, powered by <a href="https://www.livechat.com/?welcome" rel="noopener nofollow" target="_blank">LiveChat</a></noscript>
+<noscript><a href="https://www.livechat.com/chat-with/19291328/" rel="nofollow">Chat with us</a>, powered by <a href="https://www.livechat.com/?welcome" rel="noopener nofollow" target="_blank">LiveChat</a></noscript>
 <!-- End of LiveChat code -->
 <!-- Chatbot Widget -->
 <div id="chatbot-container">

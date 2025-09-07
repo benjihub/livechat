@@ -20,8 +20,16 @@
 
 <!-- Bot bridge: forward visitor messages to your server -->
 <script>
-    // 1) Set your server endpoint (adjust port/domain as needed)
-    window.__BOT_ENDPOINT__ = 'https://livechat-pfxb.onrender.com/send-message';
+        // 1) Set your server endpoint (adjust port/domain as needed)
+        // Reverted to local-first behavior (pre-Render):
+        // - When served over http(s), use same-origin path.
+        // - When opened from file://, fall back to http://localhost:3002
+        (function(){
+            var LOCAL_ORIGIN = 'http://localhost:3002';
+            var isHttp = typeof location !== 'undefined' && /^https?:$/.test(location.protocol);
+            var sameAsServer = isHttp && (location.host === 'localhost:3002' || location.host === '127.0.0.1:3002');
+            window.__BOT_ENDPOINT__ = (sameAsServer ? '' : LOCAL_ORIGIN) + '/send-message';
+        })();
     // 2) Shared secret to protect your API (also set BOT_SECRET in your server .env)
     window.__BOT_SECRET__ = 'x-bot-secret';
 
@@ -52,3 +60,4 @@
 
 </body>
 </html>
+
